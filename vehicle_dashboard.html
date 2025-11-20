@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Vehicle Telemetry Dashboard</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial; padding: 30px; background:#f8f9fb; color:#111; }
+    h1 { margin:0 0 10px; font-size:34px; }
+    p.sub { margin:0 0 24px; color:#444; }
+    .card { background:#fff; border-radius:8px; padding:18px 20px; box-shadow:0 1px 4px rgba(20,20,30,0.06); margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;}
+    .label { color:#666; font-size:16px; }
+    .value { font-weight:800; font-size:26px; color:#111; }
+    .status { display:inline-block; padding:6px 10px; border-radius:20px; font-weight:600; font-size:14px; margin-left:8px;}
+    .connected { background:#e6fff0; color:#067a2a; border:1px solid #bdecc7; }
+    .disconnected { background:#fff0f0; color:#b20b0b; border:1px solid #f0bebe; }
+    footer { margin-top:20px; color:#666; font-size:13px; }
+    .small { font-size:14px; color:#555; }
+    .log { margin-top:12px; font-family:monospace; font-size:12px; white-space:pre-wrap; background:#111; color:#fff; padding:8px; border-radius:6px; max-height:160px; overflow:auto; display:none;}
+  </style>
+  <!-- mqtt.js from CDN -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+</head>
+<body>
+  <h1>Vehicle Telemetry Dashboard</h1>
+  <p class="sub">Data from MQTT topic: <strong>myvehicle/can</strong>
+    <span id="connBadge" class="status disconnected" style="float:right">Disconnected</span>
+  </p>
+
+  <div class="card">
+    <div>
+      <div class="label">Speed (km/h)</div>
+    </div>
+    <div class="value" id="speed">--</div>
+  </div>
+
+  <div class="card">
+    <div>
+      <div class="label">Engine Temperature (°C)</div>
+    </div>
+    <div class="value" id="temp">--</div>
+  </div>
+
+  <div class="card">
+    <div>
+      <div class="label">Fuel Level (%)</div>
+    </div>
+    <div class="value" id="fuel">--</div>
+  </div>
+
+  <div class="card">
+    <div>
+      <div class="label">Timestamp</div>
+    </div>
+    <div class="value small" id="timestamp">--</div>
+  </div>
+
+  <footer>
+    <div class="small">Broker: <code>broker.hivemq.com:8884 (wss)</code> — Topic: <code>myvehicle/can</code></div>
+    <div class="small" style="margin-top:6px">If nothing appears, make sure your publisher is running and sending JSON like <code>{"speed":31,"temp":68,"fuel":29}</code></div>
+  </footer>
+
+  <div id="log" class="log"></div>
+
+<script>
+(function(){
+  const topic = "myvehicle/can";
+  const brokerUrl = "wss://broker.hivemq.com:8884/mqtt";
+
+  const speedEl = document.getElementById('speed');
+  const tempEl = document.getElementById('temp');
+  const fuelEl = document.getElementById('fuel');
+  const tsEl = document.getElementById('timestamp');
+  const badge = document.getElementById('connBadge');
+  const logEl = document.getElementById('log');
+
+  function showLog(msg, show=true){
+    if(!logEl) return;
+    logEl.style.display = show ? 'block' : 'none';
+    logEl.textContent = (logEl.textContent ? logEl.textContent + "\n" : "") + msg;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // Connect options
+  const clientId = "webdash-" + Math.random().toString(16).substr(2,8);
+  const options = {
+    keepalive: 60,
+    clientId: clientId,
+    reconnectPeriod: 3000, // ms
+    clean: true,
+    connectTimeout: 10 * 1000
+  };
+
+  showLog("Connecting to " + brokerUrl + " ...");
+
+  const client = mqtt.connect(brokerUrl, options);
+
+  client.on('connect', function () {
+    badge.textContent = "Connected";
+    badge.className = "status connected";
+    showLog("Connected. Subscribing to " + topic);
+    client.subscribe(topic, {qos: 0}, function(err){
+      if(err) {
+        showLog("Subscribe error: " + err);
+      } else {
+        showLog("Subscribed to " + topic);
+      }
+    });
+  });
+
+  client.on('reconnect', function () {
+    badge.textContent = "Reconnecting...";
+    badge.className = "status disconnected";
+    showLog("Reconnecting...");
+  });
+
+  client.on('close', function () {
+    badge.textContent = "Disconnected";
+    badge.className = "status disconnected";
+    showLog("Connection closed");
+  });
+
+  client.on('error', function (err) {
+    badge.textContent = "Error";
+    badge.className = "status disconnected";
+    showLog("Connection error: " + err);
+    // avoid silent infinite errors
+    // client.end();
+  });
+
+  client.on('message', function (topic, message) {
+    // message is Buffer
+    let payload = null;
+    try {
+      payload = JSON.parse(message.toString());
+    } catch(e) {
+      showLog("Received non-JSON payload: " + message.toString());
+      return;
+    }
+
+    // Update fields if present in payload
+    if (payload.speed !== undefined) speedEl.textContent = payload.speed;
+    if (payload.temp  !== undefined) tempEl.textContent  = payload.temp;
+    if (payload.fuel  !== undefined) fuelEl.textContent  = payload.fuel;
+
+    // prefer provided timestamp, otherwise use local time
+    if (payload.timestamp) {
+      tsEl.textContent = payload.timestamp;
+    } else {
+      tsEl.textContent = new Date().toLocaleString();
+    }
+
+    showLog("Message: " + JSON.stringify(payload, null, 0));
+  });
+
+})();
+</script>
+</body>
+</html>
